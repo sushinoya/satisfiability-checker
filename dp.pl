@@ -196,22 +196,22 @@ unit_propogate(Lit, Clauses, FilteredClauses) :-
     remove_literal_from_clauses(NegLit, FilteredClausesIntermediate, FilteredClauses).
 
 
-eliminate_literals([], Clauses, Clauses).
-eliminate_literals([Lit|PureLiterals], Clauses, FilteredClauses) :-
+unit_propogate_for_literals([], Clauses, Clauses).
+unit_propogate_for_literals([Lit|PureLiterals], Clauses, FilteredClauses) :-
     unit_propogate(Lit, Clauses, OnceFilteredClauses),
-    eliminate_literals(PureLiterals, OnceFilteredClauses, FilteredClauses).
+    unit_propogate_for_literals(PureLiterals, OnceFilteredClauses, FilteredClauses).
 
 eliminate_pure_literals(Clauses, FilteredClauses) :-
     pure_literals(Clauses, PureLiterals),
-    eliminate_literals(PureLiterals, Clauses, FilteredClauses).
+    unit_propogate_for_literals(PureLiterals, Clauses, FilteredClauses).
 
 % Test Cases
 % pure_literals([[a], [a, not b, c], [b, not c], [d, a], [not e]], X).
 % remove_literal_from_clauses(a, [[a], [a, not b, c], [b, not c], [d, a]], X).
 % remove_clauses_containing_literal(a, [[a], [a, not b, c], [b, not c], [d, a]], X).
-% eliminate_literals([a], [[a], [a, not b, c], [b, not c], [d, a]], X).
+% unit_propogate_for_literals([a], [[a], [a, not b, c], [b, not c], [d, a]], X).
 % unit_propogate(d, [[b], [a, not b, c], [b, not c], [d, a], [not d, f]], X).
-% eliminate_literals([d], [[b], [a, not b, c], [b, not c], [d, a], [not d, f]], X).
+% unit_propogate_for_literals([d], [[b], [a, not b, c], [b, not c], [d, a], [not d, f]], X).
 % eliminate_pure_literals([[a], [a, not b, c], [b, not c], [d, a]], X).
 
 
@@ -227,13 +227,17 @@ refine_clauses(Clauses, ImprovedClauses) :-
     eliminate_trivial_clauses(NoDupClauses, NonTrivialClauses),
     ImprovedClauses = NonTrivialClauses.
 
+refine_and_eliminate_pure_literals(Clauses, ImprovedClauses) :-
+    eliminate_pure_literals(Clauses, ClausesWithoutPureLiterals),
+    refine_clauses(ClausesWithoutPureLiterals, ImprovedClauses).
 
 
 
-% MAIN DRIVER CODE
+% MAIN DP DRIVER CODE
 
-dp([[]]) :- !.
+dp([[]]) :- fail, !.
 dp(Clauses) :-
+    \+ member([], Clauses), % Prune early if empty clause is found
 	all_literals(Clauses, Literals),
 	dp_helper(Clauses, Literals, FinalClauses),
 	\+ member([], FinalClauses), !.
@@ -241,7 +245,7 @@ dp(Clauses) :-
 dp_helper([], _, []).
 dp_helper(Clauses, [], Clauses).
 dp_helper(Clauses, [Lit|OtherLit], OtherResolvants) :-
-    refine_clauses(Clauses, ImprovedClauses),
+    refine_and_eliminate_pure_literals(Clauses, ImprovedClauses),
     separate_clauses(Lit, ImprovedClauses, PosClauses, NegClauses, NeitherClauses),
     resolve_separated_clauses(Lit, PosClauses, NegClauses, Resolvents),
     \+ member([], Resolvents), % Prune early if empty clause is found
@@ -259,3 +263,52 @@ dp_helper(Clauses, [Lit|OtherLit], OtherResolvants) :-
 % dp([[a], [not a, b], [not b]]).
 % dp([[a], [not a, b], [not b, not c], [c]]).
 % dp([[a], [not a, b], [not b, not c], [c, d]]).
+
+is_unit_clause(Clause) :- Clause = [_].
+
+unit_clauses([], []).
+unit_clauses([Clause|Clauses], [Clause|UnitClauses]) :- 
+    is_unit_clause(Clause), !,
+    unit_clauses(Clauses, UnitClauses).
+unit_clauses([Clause|Clauses], UnitClauses) :- 
+    \+ is_unit_clause(Clause),
+    unit_clauses(Clauses, UnitClauses).
+
+unit_clause_literals(Clause, UnitClauseLiterals) :-
+    unit_clauses(Clause, UnitClauses),
+    flatten(UnitClauses, UnitClauseLiteralsWithDuplicates),
+    sort(UnitClauseLiteralsWithDuplicates, UnitClauseLiterals).
+
+% unit_clauses([[b], [a, not b, c], [b, not c], [d, a], [not d, f], [not f]], X).
+% unit_clause_literals([[b], [a, not b, c], [b, not c], [d, a], [not d, f], [not f]], X).
+
+% MAIN DLL DRIVER CODE
+dll(Clauses) :-
+    \+ member([], Clauses),
+    all_literals(Clauses, Literals),
+    dll_helper(Literals, Clauses).
+
+dll_helper(_, []). % Clauses is empty cube
+dll_helper([Lit|Literals], Clauses) :-
+    \+ member([], Clauses), % Clauses contain empty clause
+    negate(Lit, NegLit),
+    unit_clause_literals(Clauses, UnitClauseLiterals),
+    unit_propogate_for_literals(UnitClauseLiterals, Clauses, UpdatedClauses),
+    union([[Lit]], UpdatedClauses, ClausesWithPosLit),
+    union([[NegLit]], UpdatedClauses, ClausesWithNegLit),
+    append(Literals, [Lit], UpdatedLiterals),
+    execute_or(UpdatedClauses = [], dll_helper(UpdatedLiterals, ClausesWithPosLit), dll_helper(UpdatedLiterals, ClausesWithNegLit)).
+
+execute_or(A, _, _) :- A, !.
+execute_or(_, B, _) :- B, !.
+execute_or(_, _, C) :- C, !.
+
+
+% dll([]).
+% dll([[]]).
+% dll([[a], [not a]]).
+% dll([[a], [not a, b]]).
+% dll([[a], [not a, b], [not b]]).
+% dll([[a], [not a, b], [not b, not c], [c]]).
+% dll([[a], [not a, b], [not b, not c], [c, d]]).
+
