@@ -62,12 +62,15 @@ positive_and_negative_literals(Clauses, PosAndNegLits) :-
 % Superset Elimination
 is_superset(X, Y) :- ord_subset(Y, X).
 
+% Checks if elem is a superset of any element in a list
 is_superset_of_a_elem(_, []) :- fail.
 is_superset_of_a_elem(X, [H|_]) :- 
     is_superset(X, H), !.
 is_superset_of_a_elem(X, [H|T]) :- 
     \+ is_superset(X, H), is_superset_of_a_elem(X, T).
 
+% Goes through a list from left to right and filters away the head
+% if it is a superset of any element on its right.
 eliminate_superset_clauses_in_one_direction([L], [L]).
 eliminate_superset_clauses_in_one_direction([Clause|Clauses], FilteredClauses) :-
 	is_superset_of_a_elem(Clause, Clauses), !,
@@ -76,6 +79,8 @@ eliminate_superset_clauses_in_one_direction([Clause|Clauses], [Clause|FilteredCl
 	\+ is_superset_of_a_elem(Clause, Clauses),
 	eliminate_superset_clauses_in_one_direction(Clauses, FilteredClauses).
 
+% Removing supersets from both right and left for all elements achieves
+% the task of eliminating any redundant supersets.
 eliminate_superset_clauses([], []) :- !.
 eliminate_superset_clauses(Clauses, FilteredClauses) :-
     eliminate_superset_clauses_in_one_direction(Clauses, OnePassClauses),
@@ -137,19 +142,23 @@ pure_literals_helper([Lit|Literals], PureLiterals) :-
     remove(NegLit, FilteredLiteralsIntermediate, FilteredLiterals),
     pure_literals_helper(FilteredLiterals, PureLiterals).
 
-
+% For the literal, remove the clauses containing the literal and 
+% remove the negation of the literal from all clauses.
 unit_propogate(_, [], []).
 unit_propogate(Lit, Clauses, FilteredClauses) :-
     negate(Lit, NegLit),
     remove_clauses_containing_literal(Lit, Clauses, FilteredClausesIntermediate),
     remove_literal_from_clauses(NegLit, FilteredClausesIntermediate, FilteredClauses).
 
-
+% For a list of literals, remove the clauses containing these literals and 
+% remove the negation of the literals from all clauses.
 unit_propogate_for_literals([], Clauses, Clauses).
 unit_propogate_for_literals([Lit|PureLiterals], Clauses, FilteredClauses) :-
     unit_propogate(Lit, Clauses, OnceFilteredClauses),
     unit_propogate_for_literals(PureLiterals, OnceFilteredClauses, FilteredClauses).
 
+% For every literal which apears only in one polarity, remove the clauses containing 
+% these literals and remove the negation of the literals from all clauses.
 eliminate_pure_literals(Clauses, FilteredClauses) :-
     pure_literals(Clauses, PureLiterals),
     unit_propogate_for_literals(PureLiterals, Clauses, FilteredClauses).
@@ -158,6 +167,7 @@ eliminate_pure_literals(Clauses, FilteredClauses) :-
 % Unit Clause Elimination
 is_unit_clause(Clause) :- Clause = [_].
 
+% Gets list of unit clauses
 unit_clauses([], []).
 unit_clauses([Clause|Clauses], [Clause|UnitClauses]) :- 
     is_unit_clause(Clause), !,
@@ -166,11 +176,14 @@ unit_clauses([Clause|Clauses], UnitClauses) :-
     \+ is_unit_clause(Clause),
     unit_clauses(Clauses, UnitClauses).
 
+% Gets list of unit literals i.e, literals in unit clauses
 unit_clause_literals(Clause, UnitClauseLiterals) :-
     unit_clauses(Clause, UnitClauses),
     flatten(UnitClauses, UnitClauseLiteralsWithDuplicates),
     remove_duplicates(UnitClauseLiteralsWithDuplicates, UnitClauseLiterals).
 
+% For every literal which apears only in a unit clause, remove the clauses containing 
+% these literals and remove the negation of the literals from all clauses.
 eliminate_unit_clauses(Clauses, UpdatedClauses) :-
   unit_clause_literals(Clauses, UnitClauseLiterals),
   unit_propogate_for_literals(UnitClauseLiterals, Clauses, UpdatedClauses).
@@ -270,6 +283,9 @@ dll_helper([Lit|Literals], Clauses) :-
         dll_helper(UpdatedLiterals, ClausesWithNegLit)
     ).
 
+% Succeeds if A succeeds or B succeeds or C. There are in-built methods in prolog to
+% achieve the same functionality but I found this very readable and allows dll/1 to
+% mimic the imperative structure of the psuedocode for DLL.
 execute_or(A, _, _) :- A, !.
 execute_or(_, B, _) :- B, !.
 execute_or(_, _, C) :- C, !.
